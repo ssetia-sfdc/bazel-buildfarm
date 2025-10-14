@@ -144,6 +144,10 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.netty.handler.codec.http.QueryStringDecoder;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.instrumentation.annotations.SpanAttribute;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.Histogram;
@@ -547,6 +551,7 @@ public class ServerInstance extends NodeInstance {
               new Runnable() {
                 final Stopwatch stopwatch = Stopwatch.createUnstarted();
 
+                @WithSpan
                 ListenableFuture<Void> iterate() throws IOException, InterruptedException {
                   ensureCanQueue(stopwatch); // wait for transition to canQueue state
                   long canQueueUSecs = stopwatch.elapsed(MICROSECONDS);
@@ -721,6 +726,7 @@ public class ServerInstance extends NodeInstance {
     }
   }
 
+  @WithSpan
   private void ensureCanQueue(Stopwatch stopwatch) throws IOException, InterruptedException {
     while (!backplane.canQueue()) {
       stopwatch.stop();
@@ -2116,6 +2122,7 @@ public class ServerInstance extends NodeInstance {
         uploadedFuture,
         new FutureCallback<>() {
           @Override
+          @WithSpan
           public void onSuccess(QueuedOperationResult result) {
             Operation queueOperation =
                 operation.toBuilder().setMetadata(Any.pack(result.metadata)).build();
@@ -2124,12 +2131,18 @@ public class ServerInstance extends NodeInstance {
               requeuedFuture.set(null);
             } catch (IOException e) {
               onFailure(e);
+              Span.current().recordException(e).setStatus(StatusCode.ERROR);
             }
           }
 
           @Override
+          @WithSpan
           public void onFailure(Throwable t) {
             requeueFailureCounter.inc();
+            Span.current()
+                .setStatus(StatusCode.ERROR)
+                .setAttribute("operation.name", operationName)
+                .recordException(t);
             log.log(Level.SEVERE, "failed to requeue: " + operationName, t);
             com.google.rpc.Status status = StatusProto.fromThrowable(t);
             if (status == null) {
@@ -2195,8 +2208,10 @@ public class ServerInstance extends NodeInstance {
             .build());
   }
 
+  @WithSpan
   private boolean canOperationBeRequeued(
-      QueueEntry queueEntry, ExecuteEntry executeEntry, Operation operation) throws IOException {
+      QueueEntry queueEntry, ExecuteEntry executeEntry, @SpanAttribute Operation operation)
+      throws IOException {
     String operationName = executeEntry.getOperationName();
 
     // Skip requeuing and fail the operation if its in a deny list.
@@ -2241,6 +2256,7 @@ public class ServerInstance extends NodeInstance {
   }
 
   @VisibleForTesting
+  @WithSpan
   public ListenableFuture<Void> requeueOperation(QueueEntry queueEntry, Duration timeout) {
     ListenableFuture<Void> future;
     ExecuteEntry executeEntry = queueEntry.getExecuteEntry();
@@ -2274,6 +2290,7 @@ public class ServerInstance extends NodeInstance {
               operationTransformService);
 
     } catch (IOException | StatusRuntimeException e) {
+      Span.current().recordException(e).setStatus(StatusCode.ERROR);
       return immediateFailedFuture(e);
     }
     return future;
@@ -3363,6 +3380,7 @@ public class ServerInstance extends NodeInstance {
     return configs;
   }
 
+  @WithSpan
   private boolean inDenyList(RequestMetadata requestMetadata) throws IOException {
     if (!useDenyList) {
       return false;
