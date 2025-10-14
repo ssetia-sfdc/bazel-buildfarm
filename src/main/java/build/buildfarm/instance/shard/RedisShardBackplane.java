@@ -1278,7 +1278,6 @@ public class RedisShardBackplane implements Backplane {
     return client.blockingCall(this::deprequeueOperation);
   }
 
-  @WithSpan
   private @Nullable QueueEntry dispatchOperation(
       UnifiedJedis jedis, List<Platform.Property> provisions, LocalResourceSet resourceSet)
       throws InterruptedException {

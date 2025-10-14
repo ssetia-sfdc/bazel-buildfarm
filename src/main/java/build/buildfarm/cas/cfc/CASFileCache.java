@@ -1534,10 +1534,9 @@ public abstract class CASFileCache implements ContentAddressableStorage {
   }
 
   @SuppressWarnings("SynchronizationOnLocalVariableOrMethodParameter")
-  @WithSpan
   private void processRootFile(
       Consumer<Digest> onStartPut,
-      @SpanAttribute Path path,
+      Path path,
       SizeEntry entry,
       ImmutableList.Builder<Path> computeDirs,
       ImmutableList.Builder<Path> deleteFiles)
